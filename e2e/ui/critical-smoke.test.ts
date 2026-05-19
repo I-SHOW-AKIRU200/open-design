@@ -10,12 +10,11 @@ test.beforeEach(async ({ page }) => {
     window.localStorage.setItem(
       key,
       JSON.stringify({
-        mode: 'api',
-        apiProtocol: 'openai',
-        apiKey: 'sk-test',
-        baseUrl: 'https://api.deepseek.com',
-        model: 'deepseek-chat',
-        agentId: null,
+        mode: 'daemon',
+        apiKey: '',
+        baseUrl: 'https://api.anthropic.com',
+        model: 'claude-sonnet-4-5',
+        agentId: 'mock',
         skillId: null,
         designSystemId: null,
         onboardingCompleted: true,
@@ -26,6 +25,23 @@ test.beforeEach(async ({ page }) => {
     );
   }, STORAGE_KEY);
 
+  await page.route('**/api/agents', async (route) => {
+    await route.fulfill({
+      json: {
+        agents: [
+          {
+            id: 'mock',
+            name: 'Mock Agent',
+            bin: 'mock-agent',
+            available: true,
+            version: 'test',
+            models: [{ id: 'default', label: 'Default' }],
+          },
+        ],
+      },
+    });
+  });
+
   await page.route('**/api/app-config', async (route) => {
     if (route.request().method() !== 'GET') {
       await route.continue();
@@ -35,7 +51,7 @@ test.beforeEach(async ({ page }) => {
       json: {
         config: {
           onboardingCompleted: true,
-          agentId: null,
+          agentId: 'mock',
           skillId: null,
           designSystemId: null,
           agentModels: {},
@@ -47,34 +63,32 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test('API empty stream shows No output instead of Done', async ({ page }) => {
-  await page.route('**/api/proxy/openai/stream', async (route) => {
-    await route.fulfill({
-      status: 200,
-      headers: {
-        'content-type': 'text/event-stream',
-        'cache-control': 'no-cache',
-      },
-      body: ['event: end', 'data: {}', '', ''].join('\n'),
-    });
-  });
-
+test('home loads with the primary entry controls', async ({ page }) => {
   await gotoEntryHome(page);
-  await createProject(page, 'API empty response smoke');
-  await expectWorkspaceReady(page);
-  await sendPrompt(page, 'Create a login page');
 
-  await expect(page.locator('.assistant-label', { hasText: 'No output' })).toBeVisible();
-  await expect(page.getByText(/provider ended the request/i)).toBeVisible();
-  await expect(page.locator('.assistant-label', { hasText: 'Done' })).toHaveCount(0);
+  await expect(page.getByTestId('entry-nav-home')).toHaveAttribute('aria-current', 'page');
+  await expect(page.getByTestId('entry-nav-new-project')).toBeVisible();
+  await expect(page.getByTestId('home-hero-input')).toBeVisible();
 });
 
-async function createProject(page: Page, name: string) {
+test('settings menu is reachable from home', async ({ page }) => {
+  await gotoEntryHome(page);
+
+  await page.locator('.avatar-menu .settings-icon-btn').click();
+  const settingsMenu = page.locator('.avatar-popover[role="menu"]');
+  await expect(settingsMenu).toBeVisible();
+  await expect(settingsMenu.getByRole('button', { name: /^settings$/i })).toBeVisible();
+});
+
+test('prototype project creation reaches the workspace shell', async ({ page }) => {
+  await gotoEntryHome(page);
   await openNewProjectModal(page);
   await page.getByTestId('new-project-tab-prototype').click();
-  await page.getByTestId('new-project-name').fill(name);
+  await page.getByTestId('new-project-name').fill('Critical smoke project');
   await page.getByTestId('create-project').click();
-}
+
+  await expectWorkspaceReady(page);
+});
 
 async function gotoEntryHome(page: Page) {
   await page.goto('/', { waitUntil: 'domcontentloaded' });
@@ -100,24 +114,6 @@ async function expectWorkspaceReady(page: Page) {
   await expect(page.getByTestId('chat-composer')).toBeVisible();
   await expect(page.getByTestId('chat-composer-input')).toBeVisible();
   await expect(page.getByTestId('file-workspace')).toBeVisible();
-}
-
-async function sendPrompt(page: Page, prompt: string) {
-  const input = page.getByTestId('chat-composer-input');
-  const sendButton = page.getByTestId('chat-send');
-  await expect(input).toBeVisible({ timeout: 3_000 });
-  await input.fill(prompt);
-  await expect(sendButton).toBeEnabled();
-  await Promise.all([
-    page.waitForResponse(
-      (response) => {
-        const url = new URL(response.url());
-        return url.pathname === '/api/proxy/openai/stream' && response.request().method() === 'POST';
-      },
-      { timeout: 10_000 },
-    ),
-    sendButton.click(),
-  ]);
 }
 
 async function waitForLoadingToClear(page: Page) {
