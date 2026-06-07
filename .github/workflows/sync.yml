@@ -24,5 +24,5 @@ jobs:
           git config --global user.name "GitHub Action"
           
           # Force push the main workspace branch directly to Hugging Face
-          git push --force https://AKIRU0007:$HF_TOKEN@huggingface.co/spaces/AKIRU0007/open-design-backend main
+          git push --force https://AKIRU0007:"$HF_TOKEN"@huggingface.co/spaces/AKIRU0007/open-design-backend main
           
